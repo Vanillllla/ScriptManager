@@ -13,10 +13,43 @@ import winshell
 from win32com.client import Dispatch
 from datetime import datetime
 
+# Настройки тем
+THEMES = {
+    "light": {
+        "bg": "#ffffff",
+        "fg": "#000000",
+        "frame_bg": "#f0f0f0",
+        "button_bg": "#e0e0e0",
+        "button_fg": "#000000",
+        "listbox_bg": "#ffffff",
+        "listbox_fg": "#000000",
+        "progress_bg": "#e0e0e0",
+        "progress_fg": "#0078d7",
+        "label_bg": "#f0f0f0",
+        "label_fg": "#000000"
+    },
+    "dark": {
+        "bg": "#2d2d30",
+        "fg": "#ffffff",
+        "frame_bg": "#3e3e42",
+        "button_bg": "#007acc",
+        "button_fg": "#ffffff",
+        "listbox_bg": "#1e1e1e",
+        "listbox_fg": "#d4d4d4",
+        "progress_bg": "#3e3e42",
+        "progress_fg": "#007acc",
+        "label_bg": "#3e3e42",
+        "label_fg": "#ffffff"
+    }
+}
+
 
 class ErrorDialog(tk.Toplevel):
-    def __init__(self, parent, script_name, error_message):
+    def __init__(self, parent, script_name, error_message, theme="light"):
         super().__init__(parent)
+        self.theme = theme
+        self.colors = THEMES.get(theme, THEMES["light"])
+
         self.title("Ошибка скрипта")
         self.geometry("700x500")
         self.resizable(True, True)
@@ -26,7 +59,11 @@ class ErrorDialog(tk.Toplevel):
         self.script_name = script_name
         self.error_message = error_message
 
+        self.apply_theme()
         self.init_ui()
+
+    def apply_theme(self):
+        self.configure(bg=self.colors["bg"])
 
     def init_ui(self):
         main_frame = ttk.Frame(self, padding=10)
@@ -208,11 +245,25 @@ class SettingsDialog(tk.Toplevel):
         self.destroy()
 
 
+class RoundedFrame(ttk.Frame):
+    """Кастомный фрейм с закругленными углами"""
+
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.configure(relief="solid", borderwidth=1)
+        self.style = ttk.Style()
+        self.style.configure("Rounded.TFrame", background="#f0f0f0")
+
+
 class ScriptManagerTkinter:
     def __init__(self, root):
         self.root = root
         self.root.title("Script Manager")
         self.root.geometry("1200x800")
+
+        # Текущая тема
+        self.current_theme = "light"
+        self.apply_theme(self.current_theme)
 
         # Настройка иконки в трее
         self.setup_tray_icon()
@@ -231,6 +282,28 @@ class ScriptManagerTkinter:
         self.load_settings()
         self.load_scripts()
         self.start_monitoring()
+
+    def apply_theme(self, theme_name):
+        """Применяет выбранную тему"""
+        self.current_theme = theme_name
+        colors = THEMES.get(theme_name, THEMES["light"])
+
+        # Настройка стилей для ttk
+        style = ttk.Style()
+
+        if theme_name == "dark":
+            style.theme_use('clam')  # Используем тему, которая хорошо работает с темными цветами
+
+        # Настройка цветов для различных элементов
+        style.configure("TFrame", background=colors["frame_bg"])
+        style.configure("TLabel", background=colors["label_bg"], foreground=colors["label_fg"])
+        style.configure("TButton", background=colors["button_bg"], foreground=colors["button_fg"])
+        style.configure("TProgressbar", background=colors["progress_bg"], troughcolor=colors["progress_bg"])
+        style.configure("TLabelframe", background=colors["frame_bg"], foreground=colors["fg"])
+        style.configure("TLabelframe.Label", background=colors["frame_bg"], foreground=colors["fg"])
+
+        # Применяем цвета к основному окну
+        self.root.configure(bg=colors["bg"])
 
     def setup_tray_icon(self):
         """Создает иконку в системном трее"""
@@ -283,7 +356,7 @@ class ScriptManagerTkinter:
 
     def show_error_dialog(self, script_name, error_message):
         """Показывает диалоговое окно с информацией об ошибке"""
-        ErrorDialog(self.root, script_name, error_message)
+        ErrorDialog(self.root, script_name, error_message, self.current_theme)
 
     def setup_ui(self):
         # Main menu
@@ -298,9 +371,17 @@ class ScriptManagerTkinter:
         file_menu.add_command(label="Свернуть в трей", command=self.hide_to_tray)
         file_menu.add_command(label="Закрыть", command=self.quit_application)
 
-        menubar.add_cascade(label="ГЛАВНАЯ", menu=tk.Menu(menubar, tearoff=0))
-        menubar.add_cascade(label="ВИД", menu=tk.Menu(menubar, tearoff=0))
-        menubar.add_cascade(label="ДОБАВИТЬ СКРИПТ", menu=tk.Menu(menubar, tearoff=0))
+        # Меню ВИД с выбором темы
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="ВИД", menu=view_menu)
+        view_menu.add_command(label="Светлая тема", command=lambda: self.change_theme("light"))
+        view_menu.add_command(label="Тёмная тема", command=lambda: self.change_theme("dark"))
+        view_menu.add_command(label="Как в системе", command=lambda: self.change_theme("system"))
+
+        # Меню ДОБАВИТЬ СКРИПТ
+        add_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="ДОБАВИТЬ СКРИПТ", menu=add_menu)
+        add_menu.add_command(label="Добавить скрипт", command=self.add_script)
 
         # System monitoring
         system_frame = ttk.LabelFrame(self.root, text="Общая нагрузка (сумма всех скриптов):", padding=10)
@@ -328,7 +409,7 @@ class ScriptManagerTkinter:
         scripts_label.pack(anchor="w", padx=10, pady=(10, 0))
 
         # Canvas and scrollbar for active script frames
-        self.canvas = tk.Canvas(self.root)
+        self.canvas = tk.Canvas(self.root, bg=THEMES[self.current_theme]["bg"])
         self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
 
@@ -363,7 +444,8 @@ class ScriptManagerTkinter:
                    command=self.delete_from_saved).pack(side="left", padx=2)
 
         # Listbox for saved scripts
-        self.saved_listbox = tk.Listbox(saved_catalog_frame)
+        self.saved_listbox = tk.Listbox(saved_catalog_frame, bg=THEMES[self.current_theme]["listbox_bg"],
+                                        fg=THEMES[self.current_theme]["listbox_fg"])
         self.saved_listbox.pack(fill="both", expand=True)
 
         # Bind double-click to add to active
@@ -374,8 +456,28 @@ class ScriptManagerTkinter:
                                               width=300)
         active_catalog_frame.pack(fill="x", pady=(10, 0))
 
-        self.active_listbox = tk.Listbox(active_catalog_frame, height=6)
+        self.active_listbox = tk.Listbox(active_catalog_frame, height=6,
+                                         bg=THEMES[self.current_theme]["listbox_bg"],
+                                         fg=THEMES[self.current_theme]["listbox_fg"])
         self.active_listbox.pack(fill="both", expand=True)
+
+    def change_theme(self, theme_name):
+        """Изменяет тему приложения"""
+        if theme_name == "system":
+            # Здесь можно добавить логику определения системной темы
+            # Пока просто используем светлую тему
+            theme_name = "light"
+
+        self.current_theme = theme_name
+        self.apply_theme(theme_name)
+        self.settings['theme'] = theme_name
+        self.save_settings()
+
+        # Обновляем цвета Listbox
+        colors = THEMES.get(theme_name, THEMES["light"])
+        self.saved_listbox.configure(bg=colors["listbox_bg"], fg=colors["listbox_fg"])
+        self.active_listbox.configure(bg=colors["listbox_bg"], fg=colors["listbox_fg"])
+        self.canvas.configure(bg=colors["bg"])
 
     def open_settings(self):
         dialog = SettingsDialog(self.root, self.settings)
@@ -388,6 +490,10 @@ class ScriptManagerTkinter:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     self.settings = json.load(f)
+
+                # Применяем сохраненную тему
+                saved_theme = self.settings.get('theme', 'light')
+                self.change_theme(saved_theme)
         except Exception as e:
             print(f"Ошибка загрузки настроек: {str(e)}")
             self.settings = {}
@@ -593,8 +699,9 @@ class ScriptManagerTkinter:
 
     def create_script_frame(self, script_info):
         """Создает фрейм для активного скрипта"""
+        # Создаем кастомный фрейм с закругленными углами
         frame = ttk.LabelFrame(self.scrollable_frame, text=script_info['name'], padding=10)
-        frame.pack(fill="x", pady=5)
+        frame.pack(fill="x", pady=5, padx=5)
 
         # Controls
         controls_frame = ttk.Frame(frame)
@@ -604,10 +711,11 @@ class ScriptManagerTkinter:
                    command=lambda: self.configure_script(script_info)).pack(side="right", padx=2)
         ttk.Button(controls_frame, text="Удалить из активных",
                    command=lambda: self.delete_from_active(script_info)).pack(side="right", padx=2)
-        ttk.Button(controls_frame, text="Стоп",
-                   command=lambda: self.stop_script(script_info)).pack(side="right", padx=2)
-        ttk.Button(controls_frame, text="Запуск",
-                   command=lambda: self.start_script(script_info)).pack(side="right", padx=2)
+
+        # Объединенная кнопка запуска/остановки
+        self.toggle_btn = ttk.Button(controls_frame, text="Запуск",
+                                     command=lambda: self.toggle_script(script_info))
+        self.toggle_btn.pack(side="right", padx=2)
 
         # Resource monitoring
         resources_frame = ttk.Frame(frame)
@@ -639,12 +747,39 @@ class ScriptManagerTkinter:
             'memory_var': memory_var,
             'cpu_label': cpu_label,
             'memory_label': memory_label,
+            'toggle_btn': self.toggle_btn,
             'is_running': False,
             'last_cpu_times': (0, 0),  # (user, system) время
             'last_check_time': time.time()
         }
 
         self.script_frames.append(script_frame_data)
+
+    def toggle_script(self, script_info):
+        """Переключает состояние скрипта (запуск/остановка)"""
+        for script_data in self.script_frames:
+            if script_data['script_info'] == script_info:
+                if script_data['is_running']:
+                    self.stop_script(script_info)
+                else:
+                    self.start_script(script_info)
+                break
+
+    def update_toggle_button(self, script_data):
+        """Обновляет вид кнопки запуска/остановки"""
+        if script_data['is_running']:
+            script_data['toggle_btn'].config(text="Остановить", style="Stop.TButton")
+        else:
+            script_data['toggle_btn'].config(text="Запуск", style="Start.TButton")
+
+        # Настраиваем стили для кнопок
+        style = ttk.Style()
+        if self.current_theme == "dark":
+            style.configure("Start.TButton", background="#d4edda", foreground="#155724")
+            style.configure("Stop.TButton", background="#f8d7da", foreground="#721c24")
+        else:
+            style.configure("Start.TButton", background="#d4edda", foreground="#155724")
+            style.configure("Stop.TButton", background="#f8d7da", foreground="#721c24")
 
     def delete_from_active(self, script_info):
         """Удаляет скрипт из активных (но оставляет в сохраненных)"""
@@ -776,6 +911,7 @@ class ScriptManagerTkinter:
 
                     script_data['pid'] = script_data['process'].pid
                     script_data['is_running'] = True
+                    self.update_toggle_button(script_data)
 
                     # Запускаем мониторинг вывода в отдельном потоке
                     threading.Thread(target=self.monitor_script_output,
@@ -844,6 +980,7 @@ class ScriptManagerTkinter:
                 script_data['memory_var'].set(0)
                 script_data['cpu_label'].config(text="0%")
                 script_data['memory_label'].config(text="0%")
+                self.update_toggle_button(script_data)
                 break
 
     def calculate_process_cpu_usage(self, script_data):
