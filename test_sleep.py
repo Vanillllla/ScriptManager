@@ -1,6 +1,6 @@
 import time
-i = 0
+
 while True:
-    i +=1
+    t = time.time()
     time.sleep(1)
-    print(f"Работает {i} секунд")
+    print('Sleeping... ' + str(time.time() - t)[0:10] )
