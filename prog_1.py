@@ -29,9 +29,7 @@ THEMES = {
         "label_bg": "#f0f0f0",
         "label_fg": "#000000",
         "console_bg": "#000000",
-        "console_fg": "#00ff00",
-        "tree_bg": "#ffffff",
-        "tree_fg": "#000000"
+        "console_fg": "#00ff00"
     },
     "dark": {
         "bg": "#2d2d30",
@@ -46,9 +44,7 @@ THEMES = {
         "label_bg": "#3e3e42",
         "label_fg": "#ffffff",
         "console_bg": "#0c0c0c",
-        "console_fg": "#00ff00",
-        "tree_bg": "#1e1e1e",
-        "tree_fg": "#d4d4d4"
+        "console_fg": "#00ff00"
     }
 }
 
@@ -226,7 +222,7 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, settings):
         super().__init__(parent)
         self.settings = settings
-        self.parent = parent  # ДОБАВЛЕНО: сохраняем ссылку на родительское окно
+        self.parent = parent
         self.title("Настройки Python Script Manager (PSM)")
         self.geometry("500x400")
         self.resizable(False, False)
@@ -283,48 +279,23 @@ class SettingsDialog(tk.Toplevel):
             shortcut_path = os.path.join(startup_folder, "Python Script Manager (PSM).lnk")
 
             if self.autostart_var.get():
-                # Определяем путь к исполняемому файлу
-                if getattr(sys, 'frozen', False):
-                    # Если программа собрана в .exe
-                    target_path = sys.executable
-                    working_dir = os.path.dirname(sys.executable)
-                    icon_path = sys.executable
-                else:
-                    # Если запущен как .py скрипт
-                    target_path = sys.executable
-                    script_path = os.path.abspath(sys.argv[0])
-                    working_dir = os.path.dirname(script_path)
-                    # Добавляем параметр для запуска скрипта
-                    target_path = f'"{target_path}"'
-                    args = f'"{script_path}"'
-                    icon_path = sys.executable
+                # Создаем ярлык в автозагрузке
+                target = sys.executable
+                wDir = os.path.dirname(sys.executable)
+                icon = sys.executable
 
                 shell = Dispatch('WScript.Shell')
                 shortcut = shell.CreateShortCut(shortcut_path)
-                shortcut.Targetpath = target_path
-                if not getattr(sys, 'frozen', False):
-                    shortcut.Arguments = args
-                shortcut.WorkingDirectory = working_dir
-                shortcut.IconLocation = icon_path
+                shortcut.Targetpath = target
+                shortcut.WorkingDirectory = wDir
+                shortcut.IconLocation = icon
                 shortcut.save()
-
-                # Сохраняем настройку
-                self.settings['autostart'] = True
             else:
                 # Удаляем ярлык из автозагрузки
                 if os.path.exists(shortcut_path):
                     os.remove(shortcut_path)
-
-                # Сохраняем настройку
-                self.settings['autostart'] = False
-
-            # Сохраняем настройки
-            self.parent.save_settings()
-
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось настроить автозапуск: {str(e)}")
-            # В случае ошибки сбрасываем переключатель
-            self.autostart_var.set(not self.autostart_var.get())
 
     def browse_interpreter(self):
         path = filedialog.askopenfilename(
@@ -432,8 +403,14 @@ class ScriptManagerTkinter:
 
         # Текущая тема
         self.current_theme = "light"
+        self.apply_theme(self.current_theme)
 
-        # Инициализация переменных до setup_ui
+        # Настройка иконки в трее
+        self.setup_tray_icon()
+
+        # Переопределяем закрытие окна - скрываем в трей
+        self.root.protocol('WM_DELETE_WINDOW', self.hide_to_tray)
+
         self.active_scripts = []  # UUID скриптов с активными панелями
         self.saved_scripts = {}  # Все сохраненные скрипты по UUID
         self.script_frames = []
@@ -450,20 +427,13 @@ class ScriptManagerTkinter:
         # Словарь для хранения буферов вывода каждого процесса
         self.process_output_buffers = {}
 
-        # Флаг для отслеживания состояния трея
-        self.tray_icon = None
-        self.tray_thread = None
-
-        # Переопределяем закрытие окна - скрываем в трей
-        self.root.protocol('WM_DELETE_WINDOW', self.hide_to_tray)
+        # Список для связи Listbox с UUID
+        self.saved_scripts_listbox_uuid_map = []
 
         self.setup_ui()
         self.load_settings()
         self.load_scripts()
         self.start_monitoring()
-
-        # Настраиваем иконку в трее после создания основного интерфейса
-        self.root.after(100, self.setup_tray_icon)
 
     def apply_theme(self, theme_name):
         """Применяет выбранную тему"""
@@ -475,20 +445,8 @@ class ScriptManagerTkinter:
 
         if theme_name == "dark":
             style.theme_use('clam')
-        else:
-            style.theme_use('vista')
 
-        # Настройка цветов для Treeview
-        style.configure("Treeview",
-                        background=colors["tree_bg"],
-                        foreground=colors["tree_fg"],
-                        fieldbackground=colors["tree_bg"])
-
-        style.configure("Treeview.Heading",
-                        background=colors["button_bg"],
-                        foreground=colors["button_fg"])
-
-        # Настройка цветов для других элементов
+        # Настройка цветов для различных элементов
         style.configure("TFrame", background=colors["frame_bg"])
         style.configure("TLabel", background=colors["label_bg"], foreground=colors["label_fg"])
         style.configure("TButton", background=colors["button_bg"], foreground=colors["button_fg"])
@@ -503,156 +461,43 @@ class ScriptManagerTkinter:
         # Применяем цвета к основному окну
         self.root.configure(bg=colors["bg"])
 
-        # Обновляем цвет фона canvas
-        if hasattr(self, 'canvas'):
-            self.canvas.configure(bg=colors["bg"])
-
-    def setup_ui(self):
-        # Main menu
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="ФАЙЛ", menu=file_menu)
-        file_menu.add_command(label="Настройки", command=self.open_settings)
-        file_menu.add_separator()
-        file_menu.add_command(label="Свернуть в трей", command=self.hide_to_tray)
-        file_menu.add_command(label="Закрыть", command=self.quit_application)
-
-        # Меню ВИД с выбором темы
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="ВИД", menu=view_menu)
-        view_menu.add_command(label="Светлая тема", command=lambda: self.change_theme("light"))
-        view_menu.add_command(label="Тёмная тема", command=lambda: self.change_theme("dark"))
-
-        # System monitoring
-        system_frame = ttk.LabelFrame(self.root, text="Общая нагрузка (сумма всех скриптов):", padding=10)
-        system_frame.pack(fill="x", padx=10, pady=5)
-
-        self.total_cpu_var = tk.IntVar()
-        self.total_memory_var = tk.IntVar()
-
-        ttk.Label(system_frame, text="CPU:").grid(row=0, column=0, sticky="w")
-        self.total_cpu_bar = ttk.Progressbar(system_frame, variable=self.total_cpu_var, maximum=100)
-        self.total_cpu_bar.grid(row=0, column=1, sticky="ew", padx=5)
-        self.total_cpu_label = ttk.Label(system_frame, text="0%")
-        self.total_cpu_label.grid(row=0, column=2, padx=5)
-
-        ttk.Label(system_frame, text="Память:").grid(row=1, column=0, sticky="w")
-        self.total_memory_bar = ttk.Progressbar(system_frame, variable=self.total_memory_var, maximum=100)
-        self.total_memory_bar.grid(row=1, column=1, sticky="ew", padx=5)
-        self.total_memory_label = ttk.Label(system_frame, text="0%")
-        self.total_memory_label.grid(row=1, column=2, padx=5)
-
-        system_frame.columnconfigure(1, weight=1)
-
-        # Active scripts area
-        scripts_label = ttk.Label(self.root, text="Активные скрипты:", font=("Arial", 12, "bold"))
-        scripts_label.pack(anchor="w", padx=10, pady=(10, 0))
-
-        # Canvas and scrollbar for active script frames
-        self.canvas = tk.Canvas(self.root, bg=THEMES[self.current_theme]["bg"])
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
-        self.scrollbar.pack(side="right", fill="y")
-
-        # Right panel for saved scripts catalog - увеличенная ширина
-        right_frame = ttk.Frame(self.root, width=450)
-        right_frame.pack(side="right", fill="y", padx=10, pady=5)
-        right_frame.pack_propagate(False)
-
-        # Saved scripts catalog
-        saved_catalog_frame = ttk.LabelFrame(right_frame, text="КАТАЛОГ СКРИПТОВ", padding=10)
-        saved_catalog_frame.pack(fill="both", expand=True)
-
-        # Buttons for saved catalog
-        saved_buttons_frame = ttk.Frame(saved_catalog_frame)
-        saved_buttons_frame.pack(fill="x", pady=5)
-
-        ttk.Button(saved_buttons_frame, text="Добавить",
-                   command=self.add_script).pack(side="left", padx=2)
-        ttk.Button(saved_buttons_frame, text="Удалить",
-                   command=self.delete_script).pack(side="left", padx=2)
-        ttk.Button(saved_buttons_frame, text="Переименовать",
-                   command=self.rename_script).pack(side="left", padx=2)
-
-        # Treeview for saved scripts
-        tree_frame = ttk.Frame(saved_catalog_frame)
-        tree_frame.pack(fill="both", expand=True)
-
-        self.saved_tree = ttk.Treeview(tree_frame, columns=("status"), show="tree", height=15)
-        self.saved_tree.heading("#0", text="Скрипты")
-        self.saved_tree.column("#0", width=300)
-        self.saved_tree.column("status", width=100)
-
-        tree_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.saved_tree.yview)
-        self.saved_tree.configure(yscrollcommand=tree_scrollbar.set)
-
-        self.saved_tree.pack(side="left", fill="both", expand=True)
-        tree_scrollbar.pack(side="right", fill="y")
-
-        # Bind double-click to toggle active state
-        self.saved_tree.bind("<Double-Button-1>", self.on_tree_double_click)
-
-        # Применяем тему после создания всех элементов
-        self.apply_theme(self.current_theme)
-
     def setup_tray_icon(self):
         """Создает иконку в системном трее"""
-        try:
-            # Создаем изображение для иконки
-            image = Image.new('RGB', (64, 64), color='white')
-            dc = ImageDraw.Draw(image)
-            dc.rectangle([16, 16, 48, 48], fill='blue')
-            dc.text((25, 25), 'PSM', fill='white')
+        # Создаем изображение для иконки
+        image = Image.new('RGB', (64, 64), color='white')
+        dc = ImageDraw.Draw(image)
+        dc.rectangle([16, 16, 48, 48], fill='blue')
+        dc.text((25, 25), 'PSM', fill='white')
 
-            # Создаем функцию для показа окна
-            def show_window(icon, item):
-                self.show_from_tray()
+        # Создаем меню для иконки в трее
+        menu = pystray.Menu(
+            pystray.MenuItem('Развернуть окно', self.show_from_tray),
+            pystray.MenuItem('Закрыть', self.quit_application)
+        )
 
-            # Создаем меню для иконки в трее
-            menu = pystray.Menu(
-                pystray.MenuItem('Развернуть окно', show_window),
-                pystray.MenuItem('Закрыть', self.quit_application)
-            )
+        # Создаем иконку в трее
+        self.tray_icon = pystray.Icon("script_manager", image, "Python Script Manager (PSM)", menu)
 
-            # Создаем иконку в трее
-            self.tray_icon = pystray.Icon("script_manager", image, "Python Script Manager (PSM)", menu)
+        # Добавляем обработчик левого клика
+        def on_clicked(icon, item):
+            self.show_from_tray()
 
-            # Устанавливаем обработчик для левого клика
-            self.tray_icon.on_click = show_window
+        # Используем недокументированную возможность для обработки кликов
+        self.tray_icon._handler = on_clicked
 
-            # Запускаем иконку в трее в отдельном потоке
-            self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
-            self.tray_thread.start()
-        except Exception as e:
-            print(f"Ошибка создания иконки в трее: {e}")
+        # Запускаем иконку в трее в отдельном потоке
+        self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self.tray_thread.start()
 
     def hide_to_tray(self):
         """Скрывает окно в трей"""
         self.root.withdraw()
-        # Убедимся, что иконка в трее видима
-        if hasattr(self, 'tray_icon') and self.tray_icon:
-            self.tray_icon.visible = True
 
     def show_from_tray(self, icon=None, item=None):
         """Показывает окно из трея"""
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
-        self.root.attributes('-topmost', True)
-        # Убираем поверх всех окон после показа
-        self.root.after(100, lambda: self.root.attributes('-topmost', False))
 
     def quit_application(self, icon=None, item=None):
         """Полностью выключает программу"""
@@ -673,8 +518,7 @@ class ScriptManagerTkinter:
                 pass
 
         # Останавливаем иконку в трее
-        if hasattr(self, 'tray_icon') and self.tray_icon:
-            self.tray_icon.stop()
+        self.tray_icon.stop()
 
         # Закрываем приложение
         self.root.quit()
@@ -746,83 +590,122 @@ class ScriptManagerTkinter:
         else:
             messagebox.showwarning("Предупреждение", "Скрипт не запущен")
 
+    def setup_ui(self):
+        # Main menu
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="ФАЙЛ", menu=file_menu)
+        file_menu.add_command(label="Настройки", command=self.open_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="Свернуть в трей", command=self.hide_to_tray)
+        file_menu.add_command(label="Закрыть", command=self.quit_application)
+
+        # Меню ВИД с выбором темы
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="ВИД", menu=view_menu)
+        view_menu.add_command(label="Светлая тема", command=lambda: self.change_theme("light"))
+        view_menu.add_command(label="Тёмная тема", command=lambda: self.change_theme("dark"))
+        view_menu.add_command(label="Как в системе", command=lambda: self.change_theme("system"))
+
+        # System monitoring
+        system_frame = ttk.LabelFrame(self.root, text="Общая нагрузка (сумма всех скриптов):", padding=10)
+        system_frame.pack(fill="x", padx=10, pady=5)
+
+        self.total_cpu_var = tk.IntVar()
+        self.total_memory_var = tk.IntVar()
+
+        ttk.Label(system_frame, text="CPU:").grid(row=0, column=0, sticky="w")
+        self.total_cpu_bar = ttk.Progressbar(system_frame, variable=self.total_cpu_var, maximum=100)
+        self.total_cpu_bar.grid(row=0, column=1, sticky="ew", padx=5)
+        self.total_cpu_label = ttk.Label(system_frame, text="0%")
+        self.total_cpu_label.grid(row=0, column=2, padx=5)
+
+        ttk.Label(system_frame, text="Память:").grid(row=1, column=0, sticky="w")
+        self.total_memory_bar = ttk.Progressbar(system_frame, variable=self.total_memory_var, maximum=100)
+        self.total_memory_bar.grid(row=1, column=1, sticky="ew", padx=5)
+        self.total_memory_label = ttk.Label(system_frame, text="0%")
+        self.total_memory_label.grid(row=1, column=2, padx=5)
+
+        system_frame.columnconfigure(1, weight=1)
+
+        # Active scripts area
+        scripts_label = ttk.Label(self.root, text="Активные скрипты:", font=("Arial", 12, "bold"))
+        scripts_label.pack(anchor="w", padx=10, pady=(10, 0))
+
+        # Canvas and scrollbar for active script frames
+        self.canvas = tk.Canvas(self.root, bg=THEMES[self.current_theme]["bg"])
+        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Right panel for saved scripts catalog
+        right_frame = ttk.Frame(self.root)
+        right_frame.pack(side="right", fill="y", padx=10, pady=5)
+
+        # Saved scripts catalog
+        saved_catalog_frame = ttk.LabelFrame(right_frame, text="КАТАЛОГ ВСЕХ СОХРАНЕННЫХ СКРИПТОВ", padding=10,
+                                             width=300)
+        saved_catalog_frame.pack(fill="both", expand=True)
+        saved_catalog_frame.pack_propagate(False)
+
+        # Buttons for saved catalog
+        saved_buttons_frame = ttk.Frame(saved_catalog_frame)
+        saved_buttons_frame.pack(fill="x", pady=5)
+
+        ttk.Button(saved_buttons_frame, text="Добавить",
+                   command=self.add_script).pack(side="left", padx=2)
+        ttk.Button(saved_buttons_frame, text="Удалить",
+                   command=self.delete_script).pack(side="left", padx=2)
+        ttk.Button(saved_buttons_frame, text="Переименовать",
+                   command=self.rename_script).pack(side="left", padx=2)
+
+        # Listbox for saved scripts
+        self.saved_listbox = tk.Listbox(saved_catalog_frame, bg=THEMES[self.current_theme]["listbox_bg"],
+                                        fg=THEMES[self.current_theme]["listbox_fg"])
+        self.saved_listbox.pack(fill="both", expand=True)
+
+        # Bind double-click to add to active
+        self.saved_listbox.bind("<Double-Button-1>", lambda e: self.add_to_active())
+
+        # Active scripts catalog (read-only display)
+        active_catalog_frame = ttk.LabelFrame(right_frame, text="АКТИВНЫЕ СКРИПТЫ (только отображение)", padding=10,
+                                              width=300)
+        active_catalog_frame.pack(fill="x", pady=(10, 0))
+
+        self.active_listbox = tk.Listbox(active_catalog_frame, height=6,
+                                         bg=THEMES[self.current_theme]["listbox_bg"],
+                                         fg=THEMES[self.current_theme]["listbox_fg"])
+        self.active_listbox.pack(fill="both", expand=True)
+
     def change_theme(self, theme_name):
         """Изменяет тему приложения"""
+        if theme_name == "system":
+            theme_name = "light"
+
         self.current_theme = theme_name
         self.apply_theme(theme_name)
         self.settings['theme'] = theme_name
         self.save_settings()
 
-    def on_tree_double_click(self, event):
-        """Обработчик двойного клика по дереву скриптов"""
-        selection = self.saved_tree.selection()
-        if not selection:
-            return
-
-        item = selection[0]
-        parent = self.saved_tree.parent(item)
-
-        # Если есть родитель, то это скрипт (а не группа)
-        if parent:
-            item_text = self.saved_tree.item(item)["text"]
-            parent_text = self.saved_tree.item(parent)["text"]
-
-            # Находим скрипт по имени
-            script_uuid = None
-            for uuid, info in self.saved_scripts.items():
-                if info.get('display_name', info['name']) == item_text:
-                    script_uuid = uuid
-                    break
-
-            if script_uuid:
-                if parent_text == "Активные скрипты":
-                    # Перемещаем в неактивные с подтверждением
-                    if messagebox.askyesno("Подтверждение",
-                                           f"Вы уверены, что хотите переместить скрипт '{item_text}' в неактивные?"):
-                        self.remove_from_active(script_uuid)
-                elif parent_text == "Неактивные скрипты":
-                    # Перемещаем в активные
-                    self.add_to_active(script_uuid)
-
-    def update_saved_tree(self):
-        """Обновляет дерево сохраненных скриптов"""
-        self.saved_tree.delete(*self.saved_tree.get_children())
-
-        # Активные скрипты
-        active_node = self.saved_tree.insert("", "end", text="Активные скрипты", values=("",))
-        for script_uuid in self.active_scripts:
-            script_info = self.saved_scripts.get(script_uuid)
-            if script_info:
-                display_name = script_info.get('display_name', script_info['name'])
-                # Определяем статус скрипта
-                status = "Запущен" if self.is_script_running(script_uuid) else "Остановлен"
-                self.saved_tree.insert(active_node, "end", text=display_name, values=(status,))
-
-        # Неактивные скрипты
-        inactive_node = self.saved_tree.insert("", "end", text="Неактивные скрипты", values=("",))
-        for script_uuid, script_info in self.saved_scripts.items():
-            if script_uuid not in self.active_scripts:
-                display_name = script_info.get('display_name', script_info['name'])
-                self.saved_tree.insert(inactive_node, "end", text=display_name, values=("Неактивен",))
-
-        # Всегда разворачиваем узлы
-        self.saved_tree.item(active_node, open=True)
-        self.saved_tree.item(inactive_node, open=True)
-
-    def is_script_running(self, script_uuid):
-        """Проверяет, запущен ли скрипт"""
-        for script_data in self.script_frames:
-            if script_data['script_uuid'] == script_uuid:
-                return script_data['is_running']
-        return False
+        # Обновляем цвета Listbox
+        colors = THEMES.get(theme_name, THEMES["light"])
+        self.saved_listbox.configure(bg=colors["listbox_bg"], fg=colors["listbox_fg"])
+        self.active_listbox.configure(bg=colors["listbox_bg"], fg=colors["listbox_fg"])
+        self.canvas.configure(bg=colors["bg"])
 
     def open_settings(self):
-        # ДОБАВЛЕНО: Обновляем состояние автозапуска перед открытием диалога
-        startup_folder = winshell.startup()
-        shortcut_path = os.path.join(startup_folder, "Python Script Manager (PSM).lnk")
-        actual_autostart = os.path.exists(shortcut_path)
-        self.settings['autostart'] = actual_autostart
-
         dialog = SettingsDialog(self.root, self.settings)
         self.root.wait_window(dialog)
         self.save_settings()
@@ -837,17 +720,6 @@ class ScriptManagerTkinter:
                 # Применяем сохраненную тему
                 saved_theme = self.settings.get('theme', 'light')
                 self.change_theme(saved_theme)
-
-                # ДОБАВЛЕНО: Проверяем актуальность состояния автозапуска
-                startup_folder = winshell.startup()
-                shortcut_path = os.path.join(startup_folder, "Python Script Manager (PSM).lnk")
-                actual_autostart = os.path.exists(shortcut_path)
-
-                # Синхронизируем настройку с фактическим состоянием
-                if self.settings.get('autostart', False) != actual_autostart:
-                    self.settings['autostart'] = actual_autostart
-                    self.save_settings()
-
         except Exception as e:
             print(f"Ошибка загрузки настроек: {str(e)}")
             self.settings = {}
@@ -900,100 +772,90 @@ class ScriptManagerTkinter:
                 self.saved_scripts.clear()
                 self.active_scripts.clear()
                 self.script_frames.clear()
+                self.saved_scripts_listbox_uuid_map.clear()
 
                 # Очищаем интерфейс
                 for widget in self.scrollable_frame.winfo_children():
                     widget.destroy()
 
-                self.update_saved_tree()
+                self.saved_listbox.delete(0, tk.END)
+                self.active_listbox.delete(0, tk.END)
 
                 # Загружаем скрипты из файла
                 for script_uuid, script_info in loaded_scripts.items():
                     self.saved_scripts[script_uuid] = script_info
 
+                    # Добавляем в Listbox сохраненных скриптов
+                    display_name = script_info.get('display_name', script_info['name'])
+                    self.saved_listbox.insert(tk.END, display_name)
+                    self.saved_scripts_listbox_uuid_map.append(script_uuid)
+
                     # Восстанавливаем активные скрипты
                     if script_info.get('is_active', False):
                         self.active_scripts.append(script_uuid)
                         self.create_script_frame(script_uuid)
+                        self.active_listbox.insert(tk.END, display_name)
 
                         # Восстанавливаем состояние выполнения
                         if script_info.get('is_running', False):
                             # Запускаем скрипт после небольшой задержки
                             self.root.after(1000, lambda s=script_uuid: self.start_script(s))
 
-                    # ДОБАВЛЕНО: Автозапуск скриптов, даже если они не были активны
-                    if script_info.get('autostart', False):
-                        # Если скрипт еще не в активных, добавляем его
-                        if script_uuid not in self.active_scripts:
-                            self.active_scripts.append(script_uuid)
-                            self.create_script_frame(script_uuid)
-                        # Запускаем скрипт после небольшой задержки
-                        self.root.after(1000, lambda s=script_uuid: self.start_script(s))
-
-                # Обновляем дерево
-                self.update_saved_tree()
-
         except Exception as e:
             print(f"Ошибка загрузки скриптов: {str(e)}")
 
-    def add_to_active(self, script_uuid=None):
+    def update_saved_listbox(self):
+        """Обновляет список сохраненных скриптов"""
+        self.saved_listbox.delete(0, tk.END)
+        self.saved_scripts_listbox_uuid_map.clear()
+
+        for script_uuid, script_info in self.saved_scripts.items():
+            display_name = script_info.get('display_name', script_info['name'])
+            self.saved_listbox.insert(tk.END, display_name)
+            self.saved_scripts_listbox_uuid_map.append(script_uuid)
+
+    def update_active_listbox(self):
+        """Обновляет список активных скриптов (только отображение)"""
+        self.active_listbox.delete(0, tk.END)
+        for script_uuid in self.active_scripts:
+            script_info = self.saved_scripts.get(script_uuid)
+            if script_info:
+                self.active_listbox.insert(tk.END, script_info.get('display_name', script_info['name']))
+
+    def add_to_active(self):
         """Добавляет выбранный скрипт из сохраненных в активные"""
-        if script_uuid is None:
-            # Старый метод для обратной совместимости
-            selection = self.saved_tree.selection()
-            if not selection:
-                return
+        selection = self.saved_listbox.curselection()
+        if not selection:
+            return
 
-            item = selection[0]
-            parent = self.saved_tree.parent(item)
+        index = selection[0]
+        if index >= len(self.saved_scripts_listbox_uuid_map):
+            return
 
-            if not parent:
-                return
+        script_uuid = self.saved_scripts_listbox_uuid_map[index]
 
-            item_text = self.saved_tree.item(item)["text"]
+        # Проверяем, не добавлен ли уже скрипт в активные
+        if script_uuid in self.active_scripts:
+            return
 
-            # Находим скрипт по имени
-            for uuid, info in self.saved_scripts.items():
-                if info.get('display_name', info['name']) == item_text:
-                    script_uuid = uuid
-                    break
-
-        if script_uuid:
-            # Проверяем, не добавлен ли уже скрипт в активные
-            if script_uuid in self.active_scripts:
-                return
-
-            # Добавляем в активные
-            self.active_scripts.append(script_uuid)
-            self.create_script_frame(script_uuid)
-            self.update_saved_tree()
-            self.save_scripts()
+        # Добавляем в активные
+        self.active_scripts.append(script_uuid)
+        self.create_script_frame(script_uuid)
+        self.update_active_listbox()
+        self.save_scripts()
 
     def delete_script(self):
         """Удаляет выбранный скрипт из сохраненных"""
-        selection = self.saved_tree.selection()
+        selection = self.saved_listbox.curselection()
         if not selection:
             messagebox.showwarning("Предупреждение", "Выберите скрипт для удаления")
             return
 
-        item = selection[0]
-        parent = self.saved_tree.parent(item)
-
-        if not parent:
+        index = selection[0]
+        if index >= len(self.saved_scripts_listbox_uuid_map):
             return
 
-        item_text = self.saved_tree.item(item)["text"]
-
-        # Находим скрипт по имени
-        script_uuid = None
-        for uuid, info in self.saved_scripts.items():
-            if info.get('display_name', info['name']) == item_text:
-                script_uuid = uuid
-                break
-
-        if not script_uuid:
-            return
-
+        script_uuid = self.saved_scripts_listbox_uuid_map[index]
         script_info = self.saved_scripts.get(script_uuid)
         if not script_info:
             return
@@ -1022,34 +884,21 @@ class ScriptManagerTkinter:
                 del self.error_messages[script_uuid]
 
             # Обновляем интерфейс
-            self.update_saved_tree()
+            self.update_saved_listbox()
             self.save_scripts()
 
     def rename_script(self):
         """Переименовывает выбранный скрипт"""
-        selection = self.saved_tree.selection()
+        selection = self.saved_listbox.curselection()
         if not selection:
             messagebox.showwarning("Предупреждение", "Выберите скрипт для переименования")
             return
 
-        item = selection[0]
-        parent = self.saved_tree.parent(item)
-
-        if not parent:
+        index = selection[0]
+        if index >= len(self.saved_scripts_listbox_uuid_map):
             return
 
-        item_text = self.saved_tree.item(item)["text"]
-
-        # Находим скрипт по имени
-        script_uuid = None
-        for uuid, info in self.saved_scripts.items():
-            if info.get('display_name', info['name']) == item_text:
-                script_uuid = uuid
-                break
-
-        if not script_uuid:
-            return
-
+        script_uuid = self.saved_scripts_listbox_uuid_map[index]
         script_info = self.saved_scripts.get(script_uuid)
         if not script_info:
             return
@@ -1062,23 +911,10 @@ class ScriptManagerTkinter:
         if dialog.result:
             new_name = dialog.result
             script_info['display_name'] = new_name
-            self.update_saved_tree()
-            # ИСПРАВЛЕНО: Обновляем только конкретный фрейм вместо всех
-            self.update_single_script_frame(script_uuid)
+            self.update_saved_listbox()
+            self.update_active_listbox()
+            self.update_script_frames()
             self.save_scripts()
-
-    def update_single_script_frame(self, script_uuid):
-        """Обновляет только один фрейм скрипта"""
-        for script_data in self.script_frames:
-            if script_data['script_uuid'] == script_uuid:
-                script_info = self.saved_scripts.get(script_uuid)
-                if not script_info:
-                    return
-
-                display_name = script_info.get('display_name', script_info['name'])
-                # Обновляем заголовок фрейма
-                script_data['frame'].configure(text=display_name)
-                break
 
     def update_script_frames(self):
         """Обновляет фреймы активных скриптов"""
@@ -1120,7 +956,8 @@ class ScriptManagerTkinter:
 
             # Обновляем интерфейс
             self.create_script_frame(script_uuid)
-            self.update_saved_tree()
+            self.update_saved_listbox()
+            self.update_active_listbox()
 
             # Сохраняем
             self.save_scripts()
@@ -1245,17 +1082,8 @@ class ScriptManagerTkinter:
         # Удаляем из активных
         if script_uuid in self.active_scripts:
             self.active_scripts.remove(script_uuid)
-
-        # ИСПРАВЛЕНО: Удаляем только конкретный фрейм вместо пересоздания всех
-        for i, script_data in enumerate(self.script_frames):
-            if script_data['script_uuid'] == script_uuid:
-                # Уничтожаем фрейм
-                script_data['frame'].destroy()
-                # Удаляем из списка фреймов
-                self.script_frames.pop(i)
-                break
-
-        self.update_saved_tree()
+        self.update_script_frames()
+        self.update_active_listbox()
         self.save_scripts()
 
     def configure_script(self, script_uuid):
@@ -1331,9 +1159,9 @@ class ScriptManagerTkinter:
             script_info['autostart'] = autostart_var.get()
 
             config_window.destroy()
-            self.update_saved_tree()
-            # ИСПРАВЛЕНО: Обновляем только конкретный фрейм вместо всех
-            self.update_single_script_frame(script_uuid)
+            self.update_saved_listbox()
+            self.update_active_listbox()
+            self.update_script_frames()
             self.save_scripts()
 
         ttk.Button(buttons_frame, text="Сохранить", command=save_config).pack(side=tk.RIGHT, padx=(5, 0))
@@ -1403,9 +1231,6 @@ class ScriptManagerTkinter:
                     script_data['is_running'] = True
                     self.update_toggle_button(script_data)
 
-                    # Обновляем статус в дереве
-                    self.update_saved_tree()
-
                     # Инициализируем буфер вывода для этого процесса
                     self.process_output_buffers[script_uuid] = ""
 
@@ -1428,8 +1253,6 @@ class ScriptManagerTkinter:
                     # Сбрасываем состояние кнопки при ошибке запуска
                     script_data['is_running'] = False
                     self.update_toggle_button(script_data)
-                    # Обновляем статус в дереве при ошибке
-                    self.update_saved_tree()
                 break
 
     def monitor_script_output(self, script_data):
@@ -1564,9 +1387,6 @@ class ScriptManagerTkinter:
                         script_data['cpu_label'].config(text="0%")
                         script_data['memory_label'].config(text="0%")
                         self.update_toggle_button(script_data)
-
-                    # Обновляем статус в дереве
-                    self.update_saved_tree()
                 break
 
     def calculate_process_cpu_usage(self, script_data):

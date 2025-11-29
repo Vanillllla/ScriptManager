@@ -1,5 +1,6 @@
 while True:
-    t = input("Введи текст: ")
+    print("Введи текст: ")
+    t = input()
     print(t)
     if t == "exit":
         break
