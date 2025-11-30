@@ -1,7 +1,7 @@
 # Python Script Manager (PSM) 🐍
 
-![PSM Interface](https://img.shields.io/badge/Version-2.0-blue)
-![Python](https://img.shields.io/badge/Python-3.6%2B-green)
+![PSM Interface](https://img.shields.io/badge/Version-1.0.4-blue)
+![Python](https://img.shields.io/badge/Python-3.13%2B-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
 **Мощный менеджер Python-скриптов с современным графическим интерфейсом**
