@@ -14,6 +14,18 @@ from win32com.client import Dispatch
 from datetime import datetime
 import uuid
 
+
+# Определяем базовый путь для работы с файлами в EXE
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        # Если программа запущена как EXE
+        return os.path.dirname(sys.executable)
+    else:
+        # Если программа запущена как скрипт
+        return os.path.dirname(os.path.abspath(__file__))
+
+BASE_PATH = get_base_path()
+
 # Настройки тем
 THEMES = {
     "light": {
@@ -149,18 +161,17 @@ class ConsoleDialog(tk.Toplevel):
 
 
 class ErrorDialog(tk.Toplevel):
-    def __init__(self, parent, script_name, script_path, error_message, theme="light"):
+    def __init__(self, parent, script_name, error_message, theme="light"):
         super().__init__(parent)
         self.theme = theme
         self.colors = THEMES.get(theme, THEMES["light"])
-        self.script_path = script_path
 
         self.title("Ошибка скрипта")
-        self.geometry("750x550")
+        self.geometry("700x500")
         self.resizable(True, True)
         self.transient(parent)
-        self.grab_set()
-        self.attributes('-topmost', True)
+        # УБРАНО: self.grab_set()
+        # УБРАНО: self.attributes('-topmost', True)
 
         self.script_name = script_name
         self.error_message = error_message
@@ -175,45 +186,12 @@ class ErrorDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Application info
-        app_frame = ttk.Frame(main_frame)
-        app_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(app_frame, text="Python Script Manager (PSM)",
-                  font=('Arial', 12, 'bold')).pack(anchor=tk.W)
-        ttk.Label(app_frame, text="Произошла ошибка при выполнении скрипта",
-                  font=('Arial', 10)).pack(anchor=tk.W, pady=(2, 0))
-
         # Script info
         info_frame = ttk.Frame(main_frame)
         info_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(info_frame, text="Скрипт:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
         ttk.Label(info_frame, text=self.script_name, font=('Arial', 10)).pack(anchor=tk.W, pady=(2, 0))
-
-        # Script path with hyperlink
-        path_frame = ttk.Frame(main_frame)
-        path_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(path_frame, text="Путь к файлу:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-
-        # Create a clickable path label
-        path_container = ttk.Frame(path_frame)
-        path_container.pack(fill=tk.X, pady=(2, 0))
-
-        path_label = ttk.Label(
-            path_container,
-            text=self.script_path,
-            font=('Arial', 9),
-            foreground="blue",
-            cursor="hand2"
-        )
-        path_label.pack(anchor=tk.W)
-
-        # Bind click event
-        path_label.bind("<Button-1>", self.open_script_directory)
-        path_label.bind("<Enter>", lambda e: path_label.config(foreground="darkblue"))
-        path_label.bind("<Leave>", lambda e: path_label.config(foreground="blue"))
 
         # Time info
         time_frame = ttk.Frame(main_frame)
@@ -230,15 +208,7 @@ class ErrorDialog(tk.Toplevel):
         error_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
 
         # Text widget with scrollbar for error message
-        self.error_text = tk.Text(
-            error_frame,
-            wrap=tk.WORD,
-            width=80,
-            height=15,
-            bg=self.colors["listbox_bg"],
-            fg=self.colors["listbox_fg"],
-            font=("Consolas", 9)
-        )
+        self.error_text = tk.Text(error_frame, wrap=tk.WORD, width=80, height=15)
         scrollbar = ttk.Scrollbar(error_frame, orient=tk.VERTICAL, command=self.error_text.yview)
         self.error_text.configure(yscrollcommand=scrollbar.set)
 
@@ -254,21 +224,8 @@ class ErrorDialog(tk.Toplevel):
 
         ttk.Button(buttons_frame, text="Копировать ошибку",
                    command=self.copy_error).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(buttons_frame, text="Открыть папку скрипта",
-                   command=self.open_script_directory).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(buttons_frame, text="Закрыть",
                    command=self.destroy).pack(side=tk.RIGHT)
-
-    def open_script_directory(self, event=None):
-        """Открывает папку со скриптом в проводнике"""
-        folder_path = os.path.dirname(self.script_path)
-        if os.path.exists(folder_path):
-            try:
-                os.startfile(folder_path)
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось открыть папку: {str(e)}")
-        else:
-            messagebox.showerror("Ошибка", f"Папка {folder_path} не найдена")
 
     def copy_error(self):
         """Копирует текст ошибки в буфер обмена"""
@@ -281,9 +238,9 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent, settings):
         super().__init__(parent)
         self.settings = settings
-        self.parent = parent  # ДОБАВЛЕНО: сохраняем ссылку на родительское окно
+        self.parent = parent
         self.title("Настройки Python Script Manager (PSM)")
-        self.geometry("500x400")
+        self.geometry("500x450")  # Увеличиваем высоту для новой настройки
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -304,6 +261,11 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(autostart_frame, text="Запускать Python Script Manager (PSM) при старте системы",
                         variable=self.autostart_var,
                         command=self.toggle_autostart).pack(anchor=tk.W)
+
+        # НОВАЯ НАСТРОЙКА: Мониторинг производительности
+        self.monitoring_var = tk.BooleanVar(value=self.settings.get('performance_monitoring', True))
+        ttk.Checkbutton(autostart_frame, text="Включить мониторинг производительности !!!(НЕ РАБОТАЕТ)",
+                        variable=self.monitoring_var).pack(anchor=tk.W, pady=(5, 0))
 
         # Default interpreter
         interpreter_frame = ttk.LabelFrame(main_frame, text="Интерпретатор по умолчанию", padding=10)
@@ -331,6 +293,13 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(buttons_frame, text="Отмена",
                    command=self.destroy).pack(side=tk.RIGHT)
 
+    def save_settings(self):
+        self.settings['autostart'] = self.autostart_var.get()
+        self.settings['default_interpreter'] = self.interpreter_var.get()
+        # СОХРАНЯЕМ НОВУЮ НАСТРОЙКУ
+        self.settings['performance_monitoring'] = self.monitoring_var.get()
+        self.destroy()
+
     def toggle_autostart(self):
         """Включение/выключение автозапуска"""
         try:
@@ -344,20 +313,19 @@ class SettingsDialog(tk.Toplevel):
                     target_path = sys.executable
                     working_dir = os.path.dirname(sys.executable)
                     icon_path = sys.executable
+                    args = ""
                 else:
                     # Если запущен как .py скрипт
                     target_path = sys.executable
                     script_path = os.path.abspath(sys.argv[0])
                     working_dir = os.path.dirname(script_path)
-                    # Добавляем параметр для запуска скрипта
-                    target_path = f'"{target_path}"'
                     args = f'"{script_path}"'
                     icon_path = sys.executable
 
                 shell = Dispatch('WScript.Shell')
                 shortcut = shell.CreateShortCut(shortcut_path)
                 shortcut.Targetpath = target_path
-                if not getattr(sys, 'frozen', False):
+                if args and not getattr(sys, 'frozen', False):
                     shortcut.Arguments = args
                 shortcut.WorkingDirectory = working_dir
                 shortcut.IconLocation = icon_path
@@ -492,8 +460,8 @@ class ScriptManagerTkinter:
         self.active_scripts = []  # UUID скриптов с активными панелями
         self.saved_scripts = {}  # Все сохраненные скрипты по UUID
         self.script_frames = []
-        self.scripts_file = "scripts.json"
-        self.settings_file = "settings.json"
+        self.scripts_file = os.path.join(BASE_PATH, "scripts.json")
+        self.settings_file = os.path.join(BASE_PATH, "settings.json")
         self.settings = {}
 
         # Для отслеживания ошибок
@@ -611,10 +579,26 @@ class ScriptManagerTkinter:
         scripts_label = ttk.Label(self.root, text="Активные скрипты:", font=("Arial", 12, "bold"))
         scripts_label.pack(anchor="w", padx=10, pady=(10, 0))
 
-        # Canvas and scrollbar for active script frames
-        self.canvas = tk.Canvas(self.root, bg=THEMES[self.current_theme]["bg"])
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        # Frame for active scripts with scrollbar - ИЗМЕНЕНО: создаем отдельный фрейм для области с прокруткой
+        active_scripts_frame = ttk.Frame(self.root)
+        active_scripts_frame.pack(side="left", fill="both", expand=True, padx=10, pady=5)
+
+        # Canvas and scrollbar for active script frames - ИЗМЕНЕНО: переносим в active_scripts_frame
+        self.canvas = tk.Canvas(active_scripts_frame, bg=THEMES[self.current_theme]["bg"])
+        self.scrollbar = ttk.Scrollbar(active_scripts_frame, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        # Упаковка canvas и scrollbar в active_scripts_frame
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
 
         self.scrollable_frame.bind(
             "<Configure>",
@@ -627,8 +611,8 @@ class ScriptManagerTkinter:
         self.canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Right panel for saved scripts catalog - увеличенная ширина
-        right_frame = ttk.Frame(self.root, width=450)
+        # Right panel for saved scripts catalog - УВЕЛИЧЕНА ШИРИНА в 1.3 раза
+        right_frame = ttk.Frame(self.root, width=585)  # Было 450, стало 450 * 1.3 = 585
         right_frame.pack(side="right", fill="y", padx=10, pady=5)
         right_frame.pack_propagate(False)
 
@@ -674,6 +658,81 @@ class ScriptManagerTkinter:
 
         # Применяем тему после создания всех элементов
         self.apply_theme(self.current_theme)
+
+    def show_info(self):
+        """Показывает информацию о программе"""
+        info_text = """Python Script Manager (PSM) - менеджер для управления Python-скриптами
+
+Версия: 2.0
+Разработчик: Vanillllla
+
+Основные возможности:
+• Запуск и остановка Python-скриптов
+• Мониторинг потребления ресурсов (CPU, память)
+• Интерактивная консоль для взаимодействия со скриптами
+• Каталог скриптов с возможностью группировки
+• Темная и светлая темы оформления
+• Автозапуск скриптов при старте программы
+• Работа в системном трее
+• Обработка и отображение ошибок
+
+Использование:
+1. Добавьте скрипты через кнопку 'Добавить' в каталоге
+2. Активируйте скрипты двойным кликом или через меню
+3. Запускайте/останавливайте скрипты кнопками в основном окне
+4. Используйте консоль для взаимодействия с запущенными скриптами
+5. Настройте автозапуск в настройках скрипта
+
+Для получения дополнительной информации посетите репозиторий GitHub."""
+
+        info_window = tk.Toplevel(self.root)
+        info_window.title("Информация о программе")
+        info_window.geometry("600x500")
+        info_window.resizable(False, False)
+        info_window.transient(self.root)
+        info_window.grab_set()
+        info_window.attributes('-topmost', True)
+
+        main_frame = ttk.Frame(info_window, padding=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="Python Script Manager (PSM)",
+                               font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 10))
+
+        # Text widget for info with scrollbar
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        text_widget = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            padx=10,
+            pady=10,
+            font=("Arial", 10),
+            bg=THEMES[self.current_theme]["listbox_bg"],
+            fg=THEMES[self.current_theme]["listbox_fg"]
+        )
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        text_widget.insert(tk.END, info_text)
+        text_widget.config(state=tk.DISABLED)
+
+        # Close button
+        ttk.Button(main_frame, text="Закрыть", command=info_window.destroy).pack(pady=10)
+
+    def open_github(self):
+        """Открывает репозиторий GitHub в браузере"""
+        try:
+            import webbrowser
+            webbrowser.open("https://github.com/Vanillllla/ScriptManager")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть браузер: {str(e)}")
 
     def setup_tray_icon(self):
         """Создает иконку в системном трее"""
@@ -755,7 +814,6 @@ class ScriptManagerTkinter:
             return
 
         script_name = script_info.get('display_name', script_info['name'])
-        script_path = script_info['path']  # Получаем путь к скрипту
 
         # Накопление ошибок для одного скрипта
         if script_uuid in self.error_messages:
@@ -763,8 +821,8 @@ class ScriptManagerTkinter:
         else:
             self.error_messages[script_uuid] = error_message
 
-        # ИСПРАВЛЕНИЕ: Правильный вызов ErrorDialog с передачей пути
-        ErrorDialog(self.root, script_name, script_path, self.error_messages[script_uuid], self.current_theme)
+        # Показываем диалог с накопленными ошибками
+        ErrorDialog(self.root, script_name, self.error_messages[script_uuid], self.current_theme)
 
         # Очищаем накопленные ошибки для этого скрипта
         self.error_messages[script_uuid] = ""
@@ -853,81 +911,6 @@ class ScriptManagerTkinter:
                     # Перемещаем в активные
                     self.add_to_active(script_uuid)
 
-    def show_info(self):
-        """Показывает информацию о программе"""
-        info_text = """Python Script Manager (PSM) - менеджер для управления Python-скриптами
-
-    Версия: 0.11.1(DeepSeek Edition)
-    Разработчик: Vanillllla
-
-    Основные возможности:
-    • Запуск и остановка Python-скриптов
-    • Мониторинг потребления ресурсов (CPU, память)
-    • Интерактивная консоль для взаимодействия со скриптами
-    • Каталог скриптов с возможностью группировки
-    • Темная и светлая темы оформления
-    • Автозапуск скриптов при старте программы
-    • Работа в системном трее
-    • Обработка и отображение ошибок
-
-    Использование:
-    1. Добавьте скрипты через кнопку 'Добавить' в каталоге
-    2. Активируйте скрипты двойным кликом или через меню
-    3. Запускайте/останавливайте скрипты кнопками в основном окне
-    4. Используйте консоль для взаимодействия с запущенными скриптами
-    5. Настройте автозапуск в настройках скрипта
-
-    Для получения дополнительной информации посетите репозиторий GitHub."""
-
-        info_window = tk.Toplevel(self.root)
-        info_window.title("Информация о программе")
-        info_window.geometry("600x500")
-        info_window.resizable(False, False)
-        info_window.transient(self.root)
-        info_window.grab_set()
-        info_window.attributes('-topmost', True)
-
-        main_frame = ttk.Frame(info_window, padding=15)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Title
-        title_label = ttk.Label(main_frame, text="Python Script Manager (PSM)",
-                                font=("Arial", 14, "bold"))
-        title_label.pack(pady=(0, 10))
-
-        # Text widget for info with scrollbar
-        text_frame = ttk.Frame(main_frame)
-        text_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
-        text_widget = tk.Text(
-            text_frame,
-            wrap=tk.WORD,
-            padx=10,
-            pady=10,
-            font=("Arial", 10),
-            bg=THEMES[self.current_theme]["listbox_bg"],
-            fg=THEMES[self.current_theme]["listbox_fg"]
-        )
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        text_widget.insert(tk.END, info_text)
-        text_widget.config(state=tk.DISABLED)
-
-        # Close button
-        ttk.Button(main_frame, text="Закрыть", command=info_window.destroy).pack(pady=10)
-
-    def open_github(self):
-        """Открывает репозиторий GitHub в браузере"""
-        try:
-            import webbrowser
-            webbrowser.open("https://github.com/Vanillllla/ScriptManager")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось открыть браузер: {str(e)}")
-
     def update_saved_tree(self):
         """Обновляет дерево сохраненных скриптов"""
         self.saved_tree.delete(*self.saved_tree.get_children())
@@ -986,7 +969,11 @@ class ScriptManagerTkinter:
                 saved_theme = self.settings.get('theme', 'light')
                 self.change_theme(saved_theme)
 
-                # ДОБАВЛЕНО: Проверяем актуальность состояния автозапуска
+                # ДОБАВЛЕНО: Устанавливаем настройку мониторинга производительности по умолчанию в True
+                if 'performance_monitoring' not in self.settings:
+                    self.settings['performance_monitoring'] = True
+
+                # Проверяем актуальность состояния автозапуска
                 startup_folder = winshell.startup()
                 shortcut_path = os.path.join(startup_folder, "Python Script Manager (PSM).lnk")
                 actual_autostart = os.path.exists(shortcut_path)
@@ -999,6 +986,8 @@ class ScriptManagerTkinter:
         except Exception as e:
             print(f"Ошибка загрузки настроек: {str(e)}")
             self.settings = {}
+            # ДОБАВЛЕНО: Устанавливаем настройку мониторинга производительности по умолчанию в True
+            self.settings['performance_monitoring'] = True
 
     def save_settings(self):
         """Сохраняет настройки в JSON файл"""
@@ -1448,7 +1437,6 @@ class ScriptManagerTkinter:
         self.save_scripts()
 
     def configure_script(self, script_uuid):
-        """Настройки скрипта"""
         script_info = self.saved_scripts.get(script_uuid)
         if not script_info:
             return
@@ -1499,17 +1487,18 @@ class ScriptManagerTkinter:
 
         ttk.Button(interpreter_subframe, text="Обзор", command=browse_interpreter).pack(side=tk.RIGHT)
 
-        # Autostart setting
+        # ИЗМЕНЕНО: Сначала кнопка пакетов, потом автозапуск
+        # Packages button - ПЕРЕМЕЩЕН ВВЕРХ
+        ttk.Button(main_frame, text="Показать установленные пакеты",
+                   command=lambda: self.show_script_packages(interpreter_var.get())).pack(anchor=tk.W, pady=5)
+
+        # Autostart setting - ПЕРЕМЕЩЕН ВНИЗ
         autostart_frame = ttk.Frame(main_frame)
         autostart_frame.pack(fill=tk.X, pady=5)
 
         autostart_var = tk.BooleanVar(value=script_info.get('autostart', False))
         ttk.Checkbutton(autostart_frame, text="Запускать скрипт при старте программы",
                         variable=autostart_var).pack(anchor=tk.W)
-
-        # Packages button
-        ttk.Button(main_frame, text="Показать установленные пакеты",
-                   command=lambda: self.show_script_packages(interpreter_var.get())).pack(anchor=tk.W, pady=5)
 
         # Buttons
         buttons_frame = ttk.Frame(main_frame)
@@ -1518,10 +1507,10 @@ class ScriptManagerTkinter:
         def save_config():
             script_info['display_name'] = name_var.get()
             script_info['interpreter'] = interpreter_var.get()
-            script_info['autostart'] = autostart_var.get()  # Сохраняем настройку автозапуска
+            script_info['autostart'] = autostart_var.get()
 
             config_window.destroy()
-            self.update_saved_tree()  # ОБНОВЛЕНО: Обновляем дерево для отображения автозапуска
+            self.update_saved_tree()
             self.update_single_script_frame(script_uuid)
             self.save_scripts()
 
@@ -1575,9 +1564,7 @@ class ScriptManagerTkinter:
                 script_info = script_data['script_info']
                 try:
                     if not os.path.exists(script_info['path']):
-                        error_msg = f"Файл {script_info['path']} не найден"
-                        # ИСПРАВЛЕНИЕ: Правильный вызов show_error_dialog с передачей пути
-                        self.show_error_dialog(script_uuid, error_msg)
+                        messagebox.showerror("Ошибка", f"Файл {script_info['path']} не найден")
                         return
 
                     # Запускаем процесс с правильной кодировкой
@@ -1631,6 +1618,9 @@ class ScriptManagerTkinter:
         script_uuid = script_data['script_uuid']
         script_info = script_data['script_info']
 
+        # Обновляем время для корректного расчета CPU
+        script_data['last_check_time'] = time.time()
+
         # Функция для проверки, существует ли еще скрипт
         def script_still_exists():
             return any(sd for sd in self.script_frames if sd['script_uuid'] == script_uuid)
@@ -1665,8 +1655,8 @@ class ScriptManagerTkinter:
                         # Декодируем с правильной кодировкой
                         decoded_line = decode_bytes(raw_line)
 
-                        # Добавляем префикс для ошибок
-                        output_line = f"ERROR: {decoded_line}" if is_stderr else decoded_line
+                        # УБРАНО: Добавление префикса "ERROR: " для stderr
+                        output_line = decoded_line  # Теперь и stderr и stdout выводятся как есть
 
                         # Сохраняем в буфер
                         if script_uuid in self.process_output_buffers:
@@ -1714,7 +1704,8 @@ class ScriptManagerTkinter:
 
                 if remaining_stderr:
                     decoded_stderr = decode_bytes(remaining_stderr)
-                    error_output = f"ERROR: {decoded_stderr}"
+                    # УБРАНО: Добавление префикса "ERROR: " для stderr
+                    error_output = decoded_stderr
                     if script_uuid in self.process_output_buffers:
                         self.process_output_buffers[script_uuid] += error_output
                     else:
@@ -1733,6 +1724,15 @@ class ScriptManagerTkinter:
                 script_data['process'] = None
                 script_data['pid'] = None
                 self.root.after(0, lambda: self.update_toggle_button(script_data))
+
+                # Если процесс завершился с ошибкой, показываем диалог
+                if process.returncode != 0:
+                    error_output = self.process_output_buffers.get(script_uuid, "")
+                    if error_output:  # Показываем диалог если есть любой вывод ошибки
+                        self.root.after(0, lambda: self.show_error_dialog(
+                            script_uuid,
+                            f"Скрипт завершился с ошибкой (код возврата: {process.returncode})\n\n{error_output}"
+                        ))
 
     def stop_script(self, script_uuid):
         for script_data in self.script_frames:
@@ -1762,52 +1762,32 @@ class ScriptManagerTkinter:
                     self.update_saved_tree()
                 break
 
-    def calculate_process_cpu_usage(self, script_data):
-        """Правильный расчет CPU использования для процесса"""
-        # Проверяем, существует ли еще фрейм скрипта
-        if not script_data['frame'].winfo_exists():
-            return 0, 0
-
-        if not script_data['is_running'] or not script_data['pid']:
-            return 0, 0
-
-        try:
-            process = psutil.Process(script_data['pid'])
-            current_time = time.time()
-            time_delta = current_time - script_data['last_check_time']
-
-            if time_delta > 0:
-                # Получаем текущее время CPU
-                cpu_times = process.cpu_times()
-                current_cpu_times = (cpu_times.user, cpu_times.system)
-
-                # Вычисляем разницу
-                prev_user, prev_system = script_data['last_cpu_times']
-                cpu_delta = (current_cpu_times[0] - prev_user) + (current_cpu_times[1] - prev_system)
-
-                # CPU usage в процентах (относительно времени и количества ядер)
-                cpu_percent = (cpu_delta / time_delta) * 100
-
-                # Обновляем данные для следующего расчета
-                script_data['last_cpu_times'] = current_cpu_times
-                script_data['last_check_time'] = current_time
-
-                # Получаем использование памяти
-                memory_info = process.memory_info()
-                memory_percent = (memory_info.rss / psutil.virtual_memory().total) * 100
-
-                return min(100, cpu_percent), memory_percent
-
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            script_data['is_running'] = False
-            script_data['process'] = None
-
-        return 0, 0
-
     def start_monitoring(self):
         def monitor():
+            # ПРОВЕРЯЕМ ВКЛЮЧЕН ЛИ МОНИТОРИНГ
+            if not self.settings.get('performance_monitoring', True):
+                # Если мониторинг отключен, обнуляем все показатели
+                self.total_cpu_var.set(0)
+                self.total_memory_var.set(0)
+                self.total_cpu_label.config(text="0%")
+                self.total_memory_label.config(text="0%")
+
+                for script_data in self.script_frames[:]:
+                    if script_data['frame'].winfo_exists():
+                        script_data['cpu_var'].set(0)
+                        script_data['memory_var'].set(0)
+                        script_data['cpu_label'].config(text="0%")
+                        script_data['memory_label'].config(text="0%")
+
+                # Планируем следующую проверку (на случай если мониторинг включат)
+                self.root.after(1000, monitor)
+                return
+
             total_cpu = 0
             total_memory = 0
+
+            # Получаем общую загрузку системы (включая нашу программу и все процессы)
+            system_cpu = psutil.cpu_percent(interval=0.1)
 
             # Мониторинг индивидуальных скриптов
             for script_data in self.script_frames[:]:
@@ -1815,25 +1795,41 @@ class ScriptManagerTkinter:
                 if not script_data['frame'].winfo_exists():
                     continue
 
-                if script_data['is_running']:
-                    cpu_usage, memory_usage = self.calculate_process_cpu_usage(script_data)
+                if script_data['is_running'] and script_data['pid']:
+                    try:
+                        process = psutil.Process(script_data['pid'])
 
-                    # Обновляем интерфейс
-                    script_data['cpu_var'].set(int(cpu_usage))
-                    script_data['memory_var'].set(int(memory_usage))
-                    script_data['cpu_label'].config(text=f"{cpu_usage:.1f}%")
-                    script_data['memory_label'].config(text=f"{memory_usage:.1f}%")
+                        # Правильный расчет CPU использования для процесса
+                        cpu_usage = process.cpu_percent(interval=0.1)
 
-                    total_cpu += cpu_usage
-                    total_memory += memory_usage
+                        # Использование памяти
+                        memory_usage = process.memory_percent()
+
+                        # Обновляем интерфейс
+                        script_data['cpu_var'].set(int(cpu_usage))
+                        script_data['memory_var'].set(int(memory_usage))
+                        script_data['cpu_label'].config(text=f"{cpu_usage:.1f}%")
+                        script_data['memory_label'].config(text=f"{memory_usage:.1f}%")
+
+                        total_cpu += cpu_usage
+                        total_memory += memory_usage
+
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        script_data['is_running'] = False
+                        script_data['process'] = None
+                        script_data['cpu_var'].set(0)
+                        script_data['memory_var'].set(0)
+                        script_data['cpu_label'].config(text="0%")
+                        script_data['memory_label'].config(text="0%")
                 else:
                     script_data['cpu_var'].set(0)
                     script_data['memory_var'].set(0)
                     script_data['cpu_label'].config(text="0%")
                     script_data['memory_label'].config(text="0%")
 
-            # Общая нагрузка (сумма всех процессов)
-            total_cpu = min(total_cpu, 100)
+            # Общая нагрузка (системная + все субпроцессы)
+            # Ограничиваем максимальное значение 100%
+            total_cpu = min(system_cpu, 100)
             total_memory = min(total_memory, 100)
 
             self.total_cpu_var.set(int(total_cpu))
