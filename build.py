@@ -12,8 +12,6 @@ if __name__ == '__main__':
         '--onefile',
         '--windowed',
         '--icon=icon.ico',  # Если есть иконка
-        '--add-data=settings.json;.',
-        '--add-data=scripts.json;.',
         '--hidden-import=pystray',
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
