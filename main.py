@@ -15,23 +15,26 @@ from datetime import datetime
 import uuid
 import shutil
 import winreg
+import glob
 
 
 def find_system_python():
     """
-    Находит системный интерпретатор Python в следующих местах:
+    Находит системные интерпретаторы Python в следующих местах:
     1. В переменной PATH
     2. В реестре Windows (установленные версии Python)
-    3. Стандартные пути установки
+    3. Стандартные пути установки с использованием шаблонов
     """
+    python_interpreters = []
+
     # 1. Поиск в PATH
-    python_path = shutil.which("python")
-    if python_path and os.path.exists(python_path):
-        return python_path
+    for python_name in ['python', 'python3', 'python.exe', 'python3.exe']:
+        python_path = shutil.which(python_name)
+        if python_path and os.path.exists(python_path):
+            python_interpreters.append(python_path)
 
     # 2. Поиск в реестре Windows
     try:
-        # Пытаемся найти в реестре установленные версии Python
         registry_paths = [
             (winreg.HKEY_CURRENT_USER, r"Software\Python\PythonCore"),
             (winreg.HKEY_LOCAL_MACHINE, r"Software\Python\PythonCore"),
@@ -41,7 +44,6 @@ def find_system_python():
         for hive, path in registry_paths:
             try:
                 with winreg.OpenKey(hive, path) as key:
-                    # Получаем список установленных версий
                     i = 0
                     while True:
                         try:
@@ -49,9 +51,10 @@ def find_system_python():
                             try:
                                 with winreg.OpenKey(hive, f"{path}\\{version}\\InstallPath") as install_key:
                                     install_path, _ = winreg.QueryValueEx(install_key, "")
+                                    # Ищем python.exe в папке установки
                                     python_exe = os.path.join(install_path, "python.exe")
                                     if os.path.exists(python_exe):
-                                        return python_exe
+                                        python_interpreters.append(python_exe)
                             except:
                                 pass
                             i += 1
@@ -62,25 +65,47 @@ def find_system_python():
     except:
         pass
 
-    # 3. Стандартные пути установки
-    standard_paths = [
-        r"C:\Python39\python.exe",
-        r"C:\Python38\python.exe",
-        r"C:\Python37\python.exe",
-        r"C:\Program Files\Python39\python.exe",
-        r"C:\Program Files\Python38\python.exe",
-        r"C:\Program Files\Python37\python.exe",
-        r"C:\Users\{}\AppData\Local\Programs\Python\Python39\python.exe".format(os.getenv('USERNAME')),
-        r"C:\Users\{}\AppData\Local\Programs\Python\Python38\python.exe".format(os.getenv('USERNAME')),
-        r"C:\Users\{}\AppData\Local\Programs\Python\Python37\python.exe".format(os.getenv('USERNAME'))
+    # 3. Поиск по стандартным путям с использованием шаблонов
+    standard_patterns = [
+        # r"C:\Python*\python.exe",
+        # r"C:\Program Files\Python*\python.exe",
+        r"C:\Users\{}\AppData\Local\Programs\Python\Python*\python.exe".format(os.getenv('USERNAME')),
+        # r"C:\Program Files (x86)\Python*\python.exe"
     ]
 
-    for path in standard_paths:
-        if os.path.exists(path):
-            return path
+    for pattern in standard_patterns:
+        for python_path in glob.glob(pattern):
+            if os.path.exists(python_path):
+                python_interpreters.append(python_path)
 
-    # 4. Если ничего не найдено, возвращаем текущий интерпретатор
-    return sys.executable
+    # 4. Удаляем дубликаты и сортируем по версии (новые версии первыми)
+    unique_interpreters = list(dict.fromkeys(python_interpreters))
+
+    # Сортируем по версии (если возможно)
+    def get_python_version(path):
+        try:
+            result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except:
+            pass
+        return "Unknown"
+
+    # Сначала пытаемся получить версии, затем сортируем
+    interpreters_with_versions = []
+    for interpreter in unique_interpreters:
+        version = get_python_version(interpreter)
+        interpreters_with_versions.append((interpreter, version))
+
+    # Сортируем по версии (новые версии первыми)
+    interpreters_with_versions.sort(key=lambda x: x[1], reverse=True)
+
+    # Возвращаем самый новый интерпретатор, если нашли
+    if interpreters_with_versions:
+        return interpreters_with_versions[0][0]
+
+    # 5. Если ничего не найдено, возвращаем пустую строку
+    return ""
 
 # Определяем базовый путь для работы с файлами в EXE
 def get_base_path():
@@ -1037,22 +1062,25 @@ class ScriptManagerTkinter:
                 saved_theme = self.settings.get('theme', 'light')
                 self.change_theme(saved_theme)
 
-                # ДОБАВЛЕНО: Устанавливаем настройку мониторинга производительности по умолчанию в True
+                # Устанавливаем настройку мониторинга производительности по умолчанию в True
                 if 'performance_monitoring' not in self.settings:
                     self.settings['performance_monitoring'] = True
 
                 # ОБНОВЛЕНО: Если default_interpreter не установлен, ищем системный Python
-                if 'default_interpreter' not in self.settings or not self.settings['default_interpreter']:
-                    self.settings['default_interpreter'] = find_system_python()
+                # Но оставляем пустым, если не найден
+                if 'default_interpreter' not in self.settings:
+                    system_python = find_system_python()
+                    self.settings['default_interpreter'] = system_python if system_python else ""
                     self.save_settings()
 
             else:
-                # ОБНОВЛЕНО: При первом запуске используем системный Python
+                # ОБНОВЛЕНО: При первом запуске используем системный Python, если найден
+                system_python = find_system_python()
                 self.settings = {
                     'theme': 'light',
                     'performance_monitoring': True,
                     'autostart': False,
-                    'default_interpreter': find_system_python()  # Ищем системный Python
+                    'default_interpreter': system_python if system_python else ""  # Может быть пустым
                 }
                 self.save_settings()
 
@@ -1068,11 +1096,12 @@ class ScriptManagerTkinter:
 
         except Exception as e:
             print(f"Ошибка загрузки настроек: {str(e)}")
+            system_python = find_system_python()
             self.settings = {
                 'theme': 'light',
                 'performance_monitoring': True,
                 'autostart': False,
-                'default_interpreter': find_system_python()  # Ищем системный Python даже при ошибке
+                'default_interpreter': system_python if system_python else ""  # Может быть пустым
             }
 
     def save_settings(self):
@@ -1361,8 +1390,8 @@ class ScriptManagerTkinter:
         if script_path:
             script_name = os.path.basename(script_path).replace('.py', '')
 
-            # ОБНОВЛЕНО: Используем интерпретатор из настроек (уже должен быть системный Python)
-            default_interpreter = self.settings.get('default_interpreter', find_system_python())
+            # ОБНОВЛЕНО: Используем интерпретатор из настроек (может быть пустым)
+            default_interpreter = self.settings.get('default_interpreter', "")
 
             # Создаем уникальный идентификатор для скрипта
             script_uuid = str(uuid.uuid4())
@@ -1604,19 +1633,15 @@ class ScriptManagerTkinter:
         ttk.Button(buttons_frame, text="Отмена", command=config_window.destroy).pack(side=tk.RIGHT)
 
     def show_script_packages(self, interpreter):
-        # ОБНОВЛЕНО: Добавляем проверку интерпретатора
-        if not interpreter or not os.path.exists(interpreter):
-            # Пытаемся найти системный Python
-            system_python = find_system_python()
-            if system_python and os.path.exists(system_python):
-                interpreter = system_python
-                # Обновляем настройки
-                self.settings['default_interpreter'] = interpreter
-                self.save_settings()
-            else:
-                messagebox.showerror("Ошибка",
-                                     "Интерпретатор Python не найден. Пожалуйста, укажите путь к Python в настройках.")
-                return
+        # ОБНОВЛЕНО: Разрешаем пустой интерпретатор
+        if not interpreter:
+            messagebox.showinfo("Информация",
+                                "Интерпретатор Python не указан. Пожалуйста, укажите путь к Python в настройках.")
+            return
+
+        if not os.path.exists(interpreter):
+            messagebox.showerror("Ошибка", f"Указанный интерпретатор Python не найден: {interpreter}")
+            return
 
         try:
             # Get installed packages
@@ -1655,16 +1680,21 @@ class ScriptManagerTkinter:
             messagebox.showerror("Ошибка", f"Ошибка при получении списка пакетов: {str(e)}")
 
     def validate_interpreter(self, interpreter_path):
-        """Проверяет, существует ли интерпретатор и является ли он валидным Python"""
-        if not interpreter_path or not os.path.exists(interpreter_path):
+        """Проверяет, существует ли интерпретатор"""
+        # ОБНОВЛЕНО: Разрешаем пустой путь и любые исполняемые файлы
+        if not interpreter_path:
+            return True  # Пустой путь допустим
+
+        if not os.path.exists(interpreter_path):
             return False
 
-        # Проверяем, что это исполняемый файл Python
-        filename = os.path.basename(interpreter_path).lower()
-        if not (filename.startswith('python') and filename.endswith('.exe')):
-            return False
+        # ОБНОВЛЕНО: Убираем проверку имени файла, разрешаем любые исполняемые файлы
+        # Проверяем, что это исполняемый файл (имеет расширение .exe или нет расширения)
+        if os.path.isfile(interpreter_path):
+            # В Windows обычно .exe, но могут быть и другие исполняемые файлы
+            return True
 
-        return True
+        return False
 
     def start_script(self, script_uuid):
         for script_data in self.script_frames:
@@ -1677,15 +1707,21 @@ class ScriptManagerTkinter:
 
                     # ОБНОВЛЕНО: Проверяем интерпретатор
                     interpreter = script_info['interpreter']
-                    if not interpreter or not os.path.exists(interpreter):
-                        # Пытаемся использовать системный Python
+                    if not interpreter:
+                        # Если интерпретатор не указан, пытаемся найти системный
                         system_python = find_system_python()
-                        if system_python and os.path.exists(system_python):
+                        if system_python:
                             interpreter = system_python
                             script_info['interpreter'] = interpreter  # Обновляем настройки скрипта
                         else:
-                            messagebox.showerror("Ошибка", f"Интерпретатор Python не найден: {interpreter}")
+                            messagebox.showerror("Ошибка",
+                                                 "Интерпретатор Python не указан и не найден в системе.\n"
+                                                 "Пожалуйста, укажите путь к Python в настройках скрипта.")
                             return
+
+                    if not os.path.exists(interpreter):
+                        messagebox.showerror("Ошибка", f"Интерпретатор Python не найден: {interpreter}")
+                        return
 
                     # Запускаем процесс с правильной кодировкой
                     script_data['process'] = subprocess.Popen([
@@ -1697,8 +1733,6 @@ class ScriptManagerTkinter:
                         stdin=subprocess.PIPE,
                         bufsize=0,
                         universal_newlines=False)
-
-                    # ... остальной код без изменений ...
 
                     script_data['pid'] = script_data['process'].pid
                     script_data['is_running'] = True
@@ -1725,7 +1759,7 @@ class ScriptManagerTkinter:
 
                 except Exception as e:
                     error_msg = f"Не удалось запустить скрипт: {str(e)}"
-                    # ИСПРАВЛЕНИЕ: Правильный вызов show_error_dialog
+                    # Правильный вызов show_error_dialog
                     self.show_error_dialog(script_uuid, error_msg)
                     # Сбрасываем состояние кнопки при ошибке запуска
                     script_data['is_running'] = False
